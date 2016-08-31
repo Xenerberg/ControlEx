@@ -1,0 +1,58 @@
+function [ HTM ] = DH2HTM( DH )
+%Function creates a transform function from DH parameters
+%DH = [d,theta,r,alpha];
+%HTM = 4x4 matrix containing Rot and Trans components
+typeOf_var = class(DH);
+switch(typeOf_var)
+    case 'sym'
+        d = subs(DH(1));
+        theta = subs(DH(2))*pi/180;%convert to rad
+        r = subs(DH(3));
+        alpha = double(subs(DH(4)));%convert to rad
+        if abs(alpha) == 90
+            s = sin(90*pi/180);
+            c = cos(90*pi/180);
+            if abs(c) < 1e-10
+               c = 0; 
+            end
+        elseif alpha == 0
+            s = sin(0);
+            if abs(s) < 1
+                s = 0;
+            end
+            c = cos(0);
+        end
+
+
+        HTM = [subs(cos(theta)) -subs(sin(theta))*c  subs(sin(theta))*s r*subs(cos(theta));
+               subs(sin(theta))  subs(cos(theta))*c -subs(cos(theta))*s r*subs(sin(theta));
+               0                 s                   c                  d
+               0           0                      0                     1];
+    case 'double'
+        d = (DH(1));
+        theta = (DH(2))*pi/180;%convert to rad
+        r = (DH(3));
+        alpha = double((DH(4)));%convert to rad
+        if abs(alpha) == 90
+            s = sin(90*pi/180);
+            c = cos(90*pi/180);
+            if abs(c) < 1e-10
+               c = 0; 
+            end
+        elseif alpha == 0
+            s = sin(0);
+            if abs(s) < 1
+                s = 0;
+            end
+            c = cos(0);
+        end
+
+
+        HTM = [(cos(theta)) -(sin(theta))*c  (sin(theta))*s r*(cos(theta));
+               (sin(theta))  (cos(theta))*c -(cos(theta))*s r*(sin(theta));
+               0                 s                   c                  d
+               0           0                      0                     1];
+end
+
+end
+
