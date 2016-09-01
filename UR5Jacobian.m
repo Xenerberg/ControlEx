@@ -59,15 +59,14 @@ lenLinks(6) = 0.0948;
 lenLinks(7) = 0.0750;
 J = func_Jacobi(lenLinks(3),lenLinks(4),lenLinks(5),lenLinks(6),lenLinks(7),q(1),q(2),q(3),q(4),q(5),q(6));
 
-ee_targetPos = [0.5;-0.34;0.2];
-ee_currentPos = [-0.00036;-0.1850;0.9865];%All joint angles are zero
 
-ee_targetOr =  reshape(angle2dcm(-110*pi/180,20*pi/180,70*pi/180,'XYZ')',9,1);
+%Default state of end effector
+ee_currentPos = [-0.00036;-0.1850;0.9865];%All joint angles are zero
 ee_currentOr = [1;0;0;0;0;1;0;-1;0];
 %Dampled Least squared inverse of Jacobian (DLS)
 lambda = 1e-5;
-J_star = J'*inv(J*J' + lambda*eye(12,12));
-q_target_v = J_star*([ee_targetPos-ee_currentPos;ee_targetOr - ee_currentOr]);
+
+
 
 %Script to connect with V-REP and run simulation to check on Joint
 %velocities and Joint positions.
@@ -97,10 +96,48 @@ if clientID > -1
    
    pause(1);
    counterStep = 0;
-   q_target_pos = q_target_pos + q_target_v*0.05;
+
    K_p = 5;
+   q_prev = zeros(6,1);
    while(1)
        counterStep = counterStep + 1;%increment counter
+       
+       
+       %Fetch the target pose
+       h_target = Objects_Scene(45);
+       [rtrn,ee_targetPos] = vrep.simxGetObjectPosition(clientID,h_target,-1,vrep.simx_opmode_blocking);
+       ee_targetPos = ee_targetPos';
+       [rtrn,ee_targetAngles] = vrep.simxGetObjectOrientation(clientID,h_target,-1,vrep.simx_opmode_blocking);
+       ee_targetOr = reshape(angle2dcm(ee_targetAngles(1),ee_targetAngles(2),ee_targetAngles(3),'XYZ')',9,1);
+       
+       %ee_targetPos = [-0.5;-0.34;0.45];
+       %ee_targetOr =  reshape(angle2dcm(-110*pi/180,20*pi/180,70*pi/180,'XYZ')',9,1);
+       %Fetch the end-effector pose
+       [rtrn,ee_pos] = vrep.simxGetObjectPosition(clientID,h_ee,-1,vrep.simx_opmode_blocking);
+       [rtrn,ee_anglesVREP] = vrep.simxGetObjectOrientation(clientID,h_ee,-1,vrep.simx_opmode_blocking);
+       %Fetch the joint positions
+       for iCount = 1:6
+          [rtrn,q(iCount)] = vrep.simxGetJointPosition(clientID,h_joints(iCount),vrep.simx_opmode_blocking); 
+       end   
+       q = q*180/pi;       
+       dq = (q - q_prev)/0.05;%Single difference
+       q_prev = q;
+       
+       %Compute Jacobian
+       J = func_Jacobi(lenLinks(3),lenLinks(4),lenLinks(5),lenLinks(6),lenLinks(7),q(1),q(2),q(3),q(4),q(5),q(6));
+       J_star = J'*inv(J*J' + lambda*eye(12,12));
+       %Formulate Control law
+       ee_currentPos(:,counterStep) = ee_pos';
+       R = angle2dcm(ee_anglesVREP(1),ee_anglesVREP(2),ee_anglesVREP(3),'XYZ')';       
+       ee_currentOr(:,counterStep) = reshape(R,9,1);       
+       q_target_v = J_star*([ee_targetPos-ee_currentPos(:,counterStep);ee_targetOr - ee_currentOr(:,counterStep)]);   
+       %Derive v/omega
+       tem = J*dq;
+       dR = reshape(tem(4:12),3,3);
+       omegaSO = dR*R';
+       omega_ee(:,counterStep) = [-omegaSO(2,3);omegaSO(1,3);-omegaSO(1,2)];
+       v_ee(:,counterStep) = tem(1:3);
+       [rtrn,linVel(counterStep,:),angVel(counterStep,:)] = vrep.simxGetObjectVelocity(clientID, h_ee,vrep.simx_opmode_blocking);
        
        %Set the Joint positions
        u = K_p*q_target_v*pi/180;
@@ -111,41 +148,25 @@ if clientID > -1
        if rtrn ~= 0
             display('Error in setting joint position');
        end
+       
        vrep.simxSynchronousTrigger(clientID); 
-       %pause(0.1);
-       [rtrn,ee_pos] = vrep.simxGetObjectPosition(clientID,h_ee,-1,vrep.simx_opmode_blocking);
-       [rtrn,ee_anglesVREP] = vrep.simxGetObjectOrientation(clientID,h_ee,-1,vrep.simx_opmode_blocking);
+       %pause(0.1);       
        
-       for iCount = 1:6
-          [rtrn,q(iCount)] = vrep.simxGetJointPosition(clientID,h_joints(iCount),vrep.simx_opmode_blocking); 
-       end
-       %q = q_target_pos;
-       q = q*180/pi;
-       %T_F = computeT(lenLinks(1),lenLinks(2),lenLinks(3),lenLinks(4),lenLinks(5),lenLinks(6),lenLinks(7),q(1),q(2),q(3),q(4),q(5),q(6));
        
-       J = func_Jacobi(lenLinks(3),lenLinks(4),lenLinks(5),lenLinks(6),lenLinks(7),q(1),q(2),q(3),q(4),q(5),q(6));
-       J_star = J'*inv(J*J' + lambda*eye(12,12));
-       %ee_pos_TF = T_F(1:3,4)';
-       %ee_targetPos = [0.2485;0.4021;0.6405];
-       ee_currentPos(:,counterStep) = ee_pos';%All joint angles are zero
-       %ee_targetOr = [0.9384;0.3345;0.0868];
-       R = angle2dcm(ee_anglesVREP(1),ee_anglesVREP(2),ee_anglesVREP(3),'XYZ')';
-       ee_currentOr(:,counterStep) = reshape(R,9,1);
-       
-       q_target_v = J_star*([ee_targetPos-ee_currentPos(:,counterStep);ee_targetOr - ee_currentOr(:,counterStep)]);       
+          
        error_pos(counterStep) = norm(ee_currentPos(:,counterStep) - ee_targetPos);
        error_or(counterStep) = norm(ee_currentOr(:,counterStep)-ee_targetOr);
-       if ((error_pos(counterStep) < 1e-3) && error_or(counterStep) < 1e-2  ) || counterStep >= 100
-           break;
-       end
+%        if ((error_pos(counterStep) < 1e-10) && error_or(counterStep) < 1e-12  ) || counterStep >= 100
+%            break;
+%        end
    end
    
    figure;
    subplot(2,1,1);
    hold off;
-   plot((1:counterStep)',repmat(ee_targetPos(1),counterStep,1),'line','--');hold all;
-   plot((1:counterStep)',repmat(ee_targetPos(2),counterStep,1),'line','--');
-   plot((1:counterStep)',repmat(ee_targetPos(3),counterStep,1),'line','--');
+   plot((1:counterStep)',repmat(ee_targetPos(1),counterStep,1),'linestyle','--');hold all;
+   plot((1:counterStep)',repmat(ee_targetPos(2),counterStep,1),'linestyle','--');
+   plot((1:counterStep)',repmat(ee_targetPos(3),counterStep,1),'linestyle','--');
    grid on;
    plot(ee_currentPos(1,:),'linewidth',2);
    plot(ee_currentPos(2,:),'linewidth',2);
@@ -153,9 +174,9 @@ if clientID > -1
    legend('x-set','y-set','z-set','x-traj','y-traj','z-traj');
    subplot(2,1,2);
    hold off;
-   plot((1:counterStep)',repmat(ee_targetOr(1),counterStep,1),'line','--');hold all;
-   plot((1:counterStep)',repmat(ee_targetOr(2),counterStep,1),'line','--');
-   plot((1:counterStep)',repmat(ee_targetOr(3),counterStep,1),'line','--');
+   plot((1:counterStep)',repmat(ee_targetOr(1),counterStep,1),'linestyle','--');hold all;
+   plot((1:counterStep)',repmat(ee_targetOr(2),counterStep,1),'linestyle','--');
+   plot((1:counterStep)',repmat(ee_targetOr(3),counterStep,1),'linestyle','--');
    plot(ee_currentOr(1,:),'linewidth',2);
    plot(ee_currentOr(2,:),'linewidth',2);
    plot(ee_currentOr(3,:),'linewidth',2);
@@ -171,6 +192,33 @@ if clientID > -1
    grid on;
    title('error in orientation');
    
+   figure;
+   subplot(2,1,1);
+   plot(v_ee(1,:));hold all;
+   plot(v_ee(2,:));
+   plot(v_ee(3,:));
+   title('velocity (lin.) of end-effector');
+   legend('v_x','v_y','v_z');
+   subplot(2,1,2);
+   plot(omega_ee(1,:));hold all;
+   plot(omega_ee(2,:));
+   plot(omega_ee(3,:));
+   title('velocity (ang.) of end-effector');
+   legend('\omega_x','\omega_y','\omega_z');
+   
+   figure;
+   subplot(2,1,1);
+   plot(linVel(:,1)');hold all;
+   plot(linVel(:,2)');
+   plot(linVel(:,3)');
+   title('velocity (lin.) of end-effector (VREP)');
+   legend('v_x','v_y','v_z');
+   subplot(2,1,2);
+   plot(angVel(:,1)');hold all;
+   plot(angVel(:,2)');
+   plot(angVel(:,3)');
+   title('velocity (ang.) of end-effector (VREP)');
+   legend('\omega_x','\omega_y','\omega_z');
    
    [rtrn,ee_pos] = vrep.simxGetObjectPosition(clientID,h_ee,-1,vrep.simx_opmode_blocking);
    [rtrn,ee_anglesVREP] = vrep.simxGetObjectOrientation(clientID,h_ee,-1,vrep.simx_opmode_blocking);
