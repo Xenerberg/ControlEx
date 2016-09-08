@@ -1,4 +1,8 @@
 clear all;
+b_cont = true;
+
+SetPointFeatures = rgb2gray(imread('SetFeatures.jpg'));
+corners1 = corner(SetPointFeatures);
 %Link lengths based on DH-analysis
 lenLinks(1) = 0.0085;
 lenLinks(2) = 0.0661;
@@ -69,7 +73,7 @@ ee_currentOr = [1;0;0;0;0;1;0;-1;0];
 lambda = 1e-5;
 
 
-
+objCUR5 = CUR5();
 %Script to connect with V-REP and run simulation to check on Joint
 %velocities and Joint positions.
 close all;clc;
@@ -85,6 +89,8 @@ if clientID > -1
    vrep.simxAddStatusbarMessage(clientID,'Server connected to MATLAB',vrep.simx_opmode_blocking);
    [~,Objects_Scene, ~, ~, ObjectsInScene] = vrep.simxGetObjectGroupData(clientID,vrep.sim_appobj_object_type,0,vrep.simx_opmode_blocking); 
    ObjectsInScene = ObjectsInScene(:,1);
+   %Fetch the handle for the vision sensor
+   h_VisionSensor = Objects_Scene(46);
    h_joints = zeros(6,1);
    ind_joints = [18:3:30,32];
    h_joints = Objects_Scene(ind_joints);
@@ -98,47 +104,69 @@ if clientID > -1
    
    pause(1);
    counterStep = 0;
-
+   
    K_p = 5;
    q_prev = zeros(6,1);
+   
+   
    while(1)
        counterStep = counterStep + 1;%increment counter
-       
-       
+       %If the mode is not continuous, preset the target point pose
+       h_target = Objects_Scene(45);    
+       if b_cont == false
+          vrep.simxSetObjectPosition(clientID,h_target,-1,[0.1 ;0.14;0.8],vrep.simx_opmode_blocking);
+          vrep.simxSetObjectOrientation(clientID,h_target,-1,[0*pi/180,-90*pi/180,0*pi/180],vrep.simx_opmode_blocking); 
+       end
        %Fetch the target pose
-       h_target = Objects_Scene(45);
-%        [rtrn,ee_targetPos] = vrep.simxGetObjectPosition(clientID,h_target,-1,vrep.simx_opmode_blocking);
-%        ee_targetPos = ee_targetPos';
-%        [rtrn,ee_targetAngles] = vrep.simxGetObjectOrientation(clientID,h_target,-1,vrep.simx_opmode_blocking);
-%        ee_targetOr = reshape(angle2dcm(ee_targetAngles(1),ee_targetAngles(2),ee_targetAngles(3),'XYZ')',9,1);
-%        
-       ee_targetPos = [-0.5;-0.34;0.45];
-       ee_targetOr =  reshape(angle2dcm(-110*pi/180,20*pi/180,70*pi/180,'XYZ')',9,1);
+       
+       [rtrn,ee_targetPos] = vrep.simxGetObjectPosition(clientID,h_target,-1,vrep.simx_opmode_blocking);
+       ee_targetPos = ee_targetPos';
+       [rtrn,ee_targetAngles] = vrep.simxGetObjectOrientation(clientID,h_target,-1,vrep.simx_opmode_blocking);
+       ee_targetOr = reshape(angle2dcm(ee_targetAngles(1),ee_targetAngles(2),ee_targetAngles(3),'XYZ')',9,1);
+       %Fetch image and match features       
+       
+       [rtrn_code,arr_size,mat_image] = vrep.simxGetVisionSensorImage2(clientID,h_VisionSensor,0,vrep.simx_opmode_blocking);
+       mat_image = rgb2gray(mat_image);
+       
        %Fetch the end-effector pose
        [rtrn,ee_pos] = vrep.simxGetObjectPosition(clientID,h_ee,-1,vrep.simx_opmode_blocking);
+       if rtrn == 0
+          objCUR5.vec_curr_ee_pos = ee_pos'; 
+       end
        [rtrn,ee_anglesVREP] = vrep.simxGetObjectOrientation(clientID,h_ee,-1,vrep.simx_opmode_blocking);
+       if rtrn == 0
+          objCUR5.vec_curr_ee_or = angle2dcm(ee_anglesVREP(1),ee_anglesVREP(2),ee_anglesVREP(3),'XYZ')';       
+       end
+       
        %Fetch the joint positions
        for iCount = 1:6
           [rtrn,q(iCount)] = vrep.simxGetJointPosition(clientID,h_joints(iCount),vrep.simx_opmode_blocking); 
+          if rtrn == 0
+             objCUR5.vec_q_true = q(iCount); 
+          end
        end   
-       q = q*180/pi;       
-       dq = (q - q_prev)/0.05;%Single difference
-       q_prev = q;
+       q = q*180/pi;  
+       objCUR5.vec_q_true = q;
+       dq = (objCUR5.vec_q_true - q_prev)/0.05;%Single difference
+       q_prev = objCUR5.vec_q_true;
        
        %Compute Jacobian
-       J = func_Jacobi(lenLinks(3),lenLinks(4),lenLinks(5),lenLinks(6),lenLinks(7),q(1),q(2),q(3),q(4),q(5),q(6));
-       J_star = J'*inv(J*J' + lambda*eye(12,12));
+       CUR5.mat_curr_J = objCUR5.h_func_EEJacob(objCUR5.vec_link_len,objCUR5.vec_q_true);
+       J_star = CRobot.fn_DLSInverse(CUR5.mat_curr_J);
        %Formulate Control law
-       ee_currentPos(:,counterStep) = ee_pos';
-       R = angle2dcm(ee_anglesVREP(1),ee_anglesVREP(2),ee_anglesVREP(3),'XYZ')';       
+       ee_currentPos(:,counterStep) = objCUR5.vec_curr_ee_pos;
+       R = objCUR5.vec_curr_ee_or;
        ee_currentOr(:,counterStep) = reshape(R,9,1);       
        q_target_v = J_star*([ee_targetPos-ee_currentPos(:,counterStep);ee_targetOr - ee_currentOr(:,counterStep)]);   
        %Derive v/omega
-       tem = J*dq;
+       tem = CUR5.mat_curr_J*dq;
        dR = reshape(tem(4:12),3,3);
        omegaSO = dR*R';
-       omega_ee(:,counterStep) = [-omegaSO(2,3);omegaSO(1,3);-omegaSO(1,2)];
-       v_ee(:,counterStep) = tem(1:3);
+       objCUR5.vec_ee_Omega = [-omegaSO(2,3);omegaSO(1,3);-omegaSO(1,2)];
+       omega_ee(:,counterStep) = objCUR5.vec_ee_Omega;
+       objCUR5.vec_ee_V = tem(1:3);
+       v_ee(:,counterStep) = objCUR5.vec_ee_V;
+       %Fetch velocities from VREP for a check
        [rtrn,linVel(counterStep,:),angVel(counterStep,:)] = vrep.simxGetObjectVelocity(clientID, h_ee,vrep.simx_opmode_blocking);
        
        %Set the Joint positions
@@ -158,9 +186,12 @@ if clientID > -1
           
        error_pos(counterStep) = norm(ee_currentPos(:,counterStep) - ee_targetPos);
        error_or(counterStep) = norm(ee_currentOr(:,counterStep)-ee_targetOr);
-        if ((error_pos(counterStep) < 1e-2) && error_or(counterStep) < 1e-2  ) || counterStep >= 100
-            break;
-        end
+       if (b_cont == false)
+             
+           if ((error_pos(counterStep) < 1e-2) && error_or(counterStep) < 1e-2  ) || counterStep >= 100
+                break;
+           end
+       end
    end
    
    figure;

@@ -69,7 +69,7 @@ ee_currentOr = [1;0;0;0;0;1;0;-1;0];
 lambda = 1e-5;
 
 
-
+objCUR5 = CUR5();
 %Script to connect with V-REP and run simulation to check on Joint
 %velocities and Joint positions.
 close all;clc;
@@ -116,7 +116,12 @@ if clientID > -1
        ee_targetOr =  reshape(angle2dcm(-110*pi/180,20*pi/180,70*pi/180,'XYZ')',9,1);
        %Fetch the end-effector pose
        [rtrn,ee_pos] = vrep.simxGetObjectPosition(clientID,h_ee,-1,vrep.simx_opmode_blocking);
+       if rtrn == 0
+          objCUR5.vec_curr_ee_pos = ee_pos; 
+       end
        [rtrn,ee_anglesVREP] = vrep.simxGetObjectOrientation(clientID,h_ee,-1,vrep.simx_opmode_blocking);
+       if
+       
        %Fetch the joint positions
        for iCount = 1:6
           [rtrn,q(iCount)] = vrep.simxGetJointPosition(clientID,h_joints(iCount),vrep.simx_opmode_blocking); 
