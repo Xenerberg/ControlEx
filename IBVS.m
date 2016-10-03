@@ -1,6 +1,10 @@
 clear all;
 b_cont = true;
-
+%Load the library files
+vrep = remApi('remoteApi');
+if ~libisloaded(obj.libName)
+    loadlibrary('ProjectAT_VC.lib')
+end
 SetPointFeatures = rgb2gray(imread('SetFeatures.jpg'));
 corners1 = corner(SetPointFeatures,4);
 %Link lengths based on DH-analysis
@@ -79,7 +83,7 @@ objCUR5 = CUR5();
 close all;clc;
 disp('Program started');
 %vrep = remApi('remoteApi','extApi.h'); %Using header
-vrep = remApi('remoteApi');
+
 vrep.simxFinish(-1); %Close connections that exist.
 clientID = vrep.simxStart('127.0.0.1',19997,true,true,5000,5);
 q_target_pos = zeros(6,1);
@@ -127,8 +131,7 @@ if clientID > -1
        
        [rtrn_code,arr_size,mat_image] = vrep.simxGetVisionSensorImage2(clientID,h_VisionSensor,0,vrep.simx_opmode_blocking);
        mat_image = rgb2gray(mat_image);
-       corners2 = corner(mat_image,4);
-       error = corners1 - corners2;
+       
        
        %Fetch the end-effector pose
        [rtrn,ee_pos] = vrep.simxGetObjectPosition(clientID,h_ee,-1,vrep.simx_opmode_blocking);
