@@ -1,0 +1,20 @@
+﻿
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+# On branch master
+# Your branch is up-to-date with 'origin/master'.
+#
+# Changes to be committed:
+#	modified:   J.m
+#	modified:   LBR4p_Model.ttt
+#	modified:   scene_JacTest.ttt
+#	modified:   scene_OOSM.ttt
+#
+# Changes not staged for commit:
+#	deleted:    JacobianController.asv
+#
+# Untracked files:
+#	qjoq0lau.mmi.txt
+#	x0kc524k.ppr.txt
+#
+
